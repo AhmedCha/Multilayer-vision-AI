@@ -1,0 +1,816 @@
+]633;E;for f in *.py hiervision/*.py;853cd6d3-5e2e-48e0-afa6-6640683a5480]633;C### app.py
+# Provides the web interface for the HierVision classifier.
+# Handles image uploads, threshold configuration, and displays the hierarchical
+# prediction steps (including Grad-CAM heatmaps and charts) column by column.
+
+import streamlit as st
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+from PIL import Image
+from typing import List, Tuple
+
+import config
+import pipeline
+
+
+@st.cache_resource
+def load_base_model() -> None:
+    # Caches the heavy VGG16 backbone in Streamlit memory
+    # to prevent reloading it during every UI interaction.
+    pipeline.get_cached_backbone()
+
+
+def plot_top3(top3: List[Tuple[str, float]]) -> Figure:
+    # Plots a bar chart of the top 3 predictions using matplotlib.
+    # This avoids external data-wrangling libraries like pandas.
+    fig, ax = plt.subplots(figsize=(4, 3))
+    labels = [item[0] for item in top3]
+    scores = [item[1] for item in top3]
+
+    ax.bar(labels, scores, color="skyblue")
+    ax.set_ylim(0, 1.0)
+    plt.tight_layout()
+    return fig
+
+
+def run_prediction(img: Image.Image, threshold: float) -> None:
+    # Runs the inference pipeline and builds the step-by-step UI columns.
+    with st.spinner("Analyzing image..."):
+        result = pipeline.predict(img, threshold=threshold, explain=True)
+
+    if isinstance(result, str):
+        st.error(result)
+        return
+
+    st.success(f"**Final Label:** {result.final_label} | **Status:** {result.status}")
+
+    # Distribute the step explanations evenly across columns
+    cols = st.columns(len(result.steps))
+
+    for col, step in zip(cols, result.steps):
+        with col:
+            st.subheader(f"Node: '{step.node or 'root'}'")
+            st.metric(
+                label="Prediction",
+                value=step.label,
+                delta=f"{step.confidence:.1%} conf",
+                delta_color="off"
+            )
+
+            if step.heatmap is not None:
+                st.image(step.heatmap, caption=f"Grad-CAM: {step.label}", use_container_width=True)
+
+            st.write("**Top 3 Probabilities**")
+            fig = plot_top3(step.top3)
+            st.pyplot(fig)
+
+
+def main() -> None:
+    st.title("HierVision: Hierarchical Image Classifier")
+
+    # Friendly message if no models have been trained yet
+    if pipeline.get_cached_head("") is None:
+        st.info("\U0001f44b Welcome! It looks like no model has been trained yet. Please train the root node to get started.")
+        return
+
+    load_base_model()
+
+    threshold = st.slider(
+        "Confidence Threshold",
+        min_value=0.0,
+        max_value=1.0,
+        value=float(config.THRESHOLD),
+        help="Minimum confidence required to proceed to a subcategory."
+    )
+
+    uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+
+    if uploaded_file is not None:
+        img = Image.open(uploaded_file).convert("RGB")
+        st.image(img, caption="Uploaded Image", width=300)
+
+        if st.button("Predict"):
+            run_prediction(img, threshold)
+
+
+if __name__ == "__main__":
+    main()### config.py
+# Global configuration settings and constants for the hiervision image classifier.
+# Centralizes all paths and hyperparameters so no YAML or JSON configuration files are needed.
+# Simple flat structure accessible across all modules.
+
+from pathlib import Path
+
+# Directory paths for raw data, saved model checkpoints, and evaluation reports
+DATA_DIR: Path = Path("data")
+MODELS_DIR: Path = Path("models")
+REPORTS_DIR: Path = Path("reports")
+
+# Training hyperparameters and hardware settings optimized for RTX 3050 8GB
+IMG_SIZE: int = 224
+BATCH_SIZE: int = 32
+EPOCHS: int = 10
+LR: float = 1e-3
+THRESHOLD: float = 0.80
+SEED: int = 42
+NUM_WORKERS: int = 4### hiervision/__init__.py
+# Package initialization file for the hiervision hierarchical image classifier package.
+# Marks the directory as a Python package for internal module imports.### hiervision/data.py
+# Data loading and validation for the hierarchical image classifier.
+# Handles taxonomy traversal, deterministic hashing for data splits, PyTorch datasets,
+# and sanity checking to ensure folders do not mix images and subfolders.
+
+import os
+import hashlib
+from pathlib import Path
+from PIL import Image
+import torch
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+import config
+
+
+def list_images(folder: Path) -> list[Path]:
+    # Recursively find images since leaf classes might contain subfolders of sorted images.
+    extensions = {".jpg", ".jpeg", ".png", ".webp"}
+    return [p for p in folder.rglob("*") if p.suffix.lower() in extensions]
+
+
+def find_nodes(data_dir: Path) -> list[str]:
+    # A node is any directory that contains at least one subdirectory.
+    nodes = []
+    for root, dirs, files in os.walk(data_dir):
+        if dirs:
+            rel = os.path.relpath(root, data_dir)
+            # Use "" for the root node to keep CLI commands simple and consistent.
+            nodes.append("" if rel == "." else rel.replace("\\", "/"))
+    return nodes
+
+
+def list_classes(node_path: str) -> list[str]:
+    # Classes are simply the direct subdirectories of a node, sorted alphabetically for deterministic indexing.
+    full_path = config.DATA_DIR / node_path # using config.DATA_DIR
+    return sorted([d.name for d in full_path.iterdir() if d.is_dir()])
+
+
+def get_split(rel_path: str) -> str:
+    # Hash the relative path so the same image falls in the exact same split in every node.
+    # This completely prevents data leakage across the hierarchy without needing a split file.
+    md5_hash = hashlib.md5(rel_path.encode("utf-8")).hexdigest()
+    # Use modulo on the first few hex digits to assign a percentage bucket (0-99).
+    bucket = int(md5_hash[:8], 16) % 100
+
+    # Split proportions: 80% train, 10% val, 10% test.
+    if bucket < 80:
+        return "train"
+    elif bucket < 90:
+        return "val"
+    else:
+        return "test"
+
+
+def make_transforms(train: bool) -> transforms.Compose:
+    # Use standard ImageNet normalization because the backbone is a pre-trained VGG16.
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+    if train:
+        # Mild augmentation to prevent overfitting on small datasets.
+        return transforms.Compose([
+            transforms.Resize(256),
+            transforms.RandomCrop(config.IMG_SIZE), # 224 pixels
+            transforms.RandomHorizontalFlip(),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+            transforms.ToTensor(),
+            normalize
+        ])
+    else:
+        # Deterministic crops for validation and testing.
+        return transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(config.IMG_SIZE), # 224 pixels
+            transforms.ToTensor(),
+            normalize
+        ])
+
+
+class NodeDataset(Dataset):
+    def __init__(self, node_path: str, split: str):
+        # A torch Dataset allowed by design rules.
+        self.transform = make_transforms(train=(split == "train"))
+        self.classes = list_classes(node_path)
+        self.samples = []
+
+        # Gather all matching images for this node's classes
+        for class_idx, class_name in enumerate(self.classes):
+            class_dir = config.DATA_DIR / node_path / class_name # using config.DATA_DIR
+            for img_path in list_images(class_dir):
+                # Use standard posix relative paths from the overall data root for stable hashing.
+                rel_img_path = img_path.relative_to(config.DATA_DIR).as_posix() # using config.DATA_DIR
+                if get_split(rel_img_path) == split:
+                    self.samples.append((img_path, class_idx))
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+        img_path, class_idx = self.samples[idx]
+        # Convert to RGB to ensure grayscale and RGBA images don't crash the convolutions.
+        image = Image.open(img_path).convert("RGB")
+        return self.transform(image), class_idx
+
+
+def get_loader(node_path: str, split: str) -> DataLoader:
+    # Encapsulate the dataset into a DataLoader for batching.
+    dataset = NodeDataset(node_path, split)
+    shuffle = (split == "train")
+
+    return DataLoader(
+        dataset,
+        batch_size=config.BATCH_SIZE, # hardware-optimized batch size
+        shuffle=shuffle,
+        num_workers=config.NUM_WORKERS # hardware-optimized worker count
+    )
+
+
+def class_weights(node_path: str) -> torch.Tensor:
+    # Calculate inverse frequency weights so rare classes impact the loss more heavily.
+    # Ensures nodes train correctly even if image counts between subfolders are severely unbalanced.
+    classes = list_classes(node_path)
+    counts = []
+
+    for class_name in classes:
+        class_dir = config.DATA_DIR / node_path / class_name # using config.DATA_DIR
+        counts.append(len(list_images(class_dir)))
+
+    total = sum(counts)
+    # Add a tiny epsilon to prevent division by zero in empty classes.
+    weights = [total / (c + 1e-6) for c in counts]
+    return torch.tensor(weights, dtype=torch.float32)
+
+
+def check_data() -> None:
+    # Validates directory structure, image integrity, and minimum class sizes.
+    extensions = {".jpg", ".jpeg", ".png", ".webp"}
+
+    # Structural check
+    for root, dirs, files in os.walk(config.DATA_DIR): # using config.DATA_DIR
+        has_subfolders = len(dirs) > 0
+        img_files = [f for f in files if Path(f).suffix.lower() in extensions]
+        has_images = len(img_files) > 0
+
+        # A folder can be a node or a leaf class, but never contains both.
+        if has_subfolders and has_images:
+            raise ValueError(f"Folder mixes images and subfolders: {root}")
+
+        # Corruption check
+        for f in img_files:
+            img_path = Path(root) / f
+            try:
+                # verify() reads headers without loading full pixel data.
+                with Image.open(img_path) as img:
+                    img.verify()
+            except Exception as e:
+                print(f"Corrupt image found: {img_path} ({e})")
+
+    # Size and composition report
+    nodes = find_nodes(config.DATA_DIR) # using config.DATA_DIR
+    for node in nodes:
+        print(f"Node: '{node}'")
+        for cls in list_classes(node):
+            cls_dir = config.DATA_DIR / node / cls # using config.DATA_DIR
+            count = len(list_images(cls_dir))
+            print(f"  - {cls}: {count} images")
+            if count < 20:
+                print(f"  WARNING: Class '{cls}' in node '{node}' has fewer than 20 images.")
+### hiervision/explain.py
+# Generates Grad-CAM explainability heatmaps for the hierarchical classifier.
+# Wraps the backbone and head together to compute gradients for the predicted class,
+# overlaying them on the original image to show what the model looked at.
+
+import numpy as np
+from PIL import Image
+import torch
+import torch.nn as nn
+from pytorch_grad_cam import GradCAM
+from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+from pytorch_grad_cam.utils.image import show_cam_on_image
+
+
+def grad_cam(
+    backbone: nn.Module, 
+    head: nn.Module, 
+    image_tensor: torch.Tensor, 
+    pil_image: Image.Image, 
+    class_index: int
+) -> Image.Image:
+    # We wrap the frozen feature extractor and the trained classification head into a single sequence.
+    # This allows Grad-CAM to do a full forward and backward pass from pixels to logits.
+    full_model = nn.Sequential(backbone, head)
+    full_model.eval()
+
+    # VGG16's last convolutional layer is located at index 28 in the features sequential block.
+    # We target this layer because it contains the richest spatial features before pooling.
+    target_layers = [backbone.features[28]]
+
+    # WHY: Because the backbone is frozen to save memory, none of its weights require gradients.
+    # The autograd engine will skip gradient tracking entirely unless we explicitly tell it
+    # that our input image tensor requires gradients. This forces gradients to flow back to the target layer.
+    image_tensor.requires_grad = True
+
+    # Initialize Grad-CAM with our combined model and chosen target layer.
+    cam = GradCAM(model=full_model, target_layers=target_layers)
+
+    # We tell Grad-CAM to compute the heatmap for the specific class index that was predicted.
+    targets = [ClassifierOutputTarget(class_index)]
+
+    # Add a batch dimension to the image tensor since PyTorch models expect (N, C, H, W).
+    input_tensor = image_tensor.unsqueeze(0)
+
+    # Compute the activation map. Grad-CAM returns a numpy array for the batch; we take the first item.
+    grayscale_cam = cam(input_tensor=input_tensor, targets=targets)[0]
+
+    # Convert the original PIL image to a normalized float32 numpy array (0.0 to 1.0)
+    # so we can overlay the heatmap using the show_cam_on_image utility.
+    rgb_img = np.array(pil_image.convert("RGB"), dtype=np.float32) / 255.0
+
+    # Overlay the heatmap on the original image. use_rgb=True ensures the output is RGB.
+    visualization = show_cam_on_image(rgb_img, grayscale_cam, use_rgb=True)
+
+    # Convert the resulting numpy array back into a PIL Image to return it.
+    return Image.fromarray(visualization)### hiervision/model.py
+# Manages the VGG16 shared backbone and the individual linear classification heads for each node.
+# It handles creating, loading, and saving these components to disk.
+# Keeping the backbone frozen and separate allows hierarchical training without memory exhaustion.
+
+import os
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import torch
+import torch.nn as nn
+import torchvision.models as models
+
+import config
+
+def get_device() -> torch.device:
+    """Finds the best available hardware accelerator to run the model on."""
+    # We prefer CUDA (NVIDIA) for speed, then MPS (Apple Silicon), then CPU as a fallback.
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+def load_backbone() -> nn.Module:
+    """Loads the VGG16 model, removes its final classification layer, and freezes its weights."""
+    # We use ImageNet weights because they provide great general-purpose feature extraction.
+    weights = models.VGG16_Weights.IMAGENET1K_V1
+    model = models.vgg16(weights=weights)
+
+    # VGG16's classifier ends with a Linear(4096, 1000) layer at index 6.
+    # We replace it with an Identity layer so it just outputs the 4096-dimensional feature vector.
+    model.classifier[6] = nn.Identity()
+
+    # We freeze all parameters in the backbone so they do not update during training.
+    # WHY: This drastically reduces VRAM usage (allowing larger batches on our 8GB GPU),
+    # speeds up training, and prevents our small node datasets from destroying the good ImageNet features.
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # We set the model to evaluation mode (turns off dropout) because it's only acting as a feature extractor.
+    model.eval()
+
+    # Move the model to the GPU (or chosen device) once, so it's ready for forward passes.
+    model = model.to(get_device())
+    return model
+
+def make_head(n_classes: int) -> nn.Module:
+    """Creates a new linear classification head for a specific node."""
+    # The backbone outputs 4096 features, so we map from 4096 to the number of classes for this node.
+    head = nn.Linear(4096, n_classes)
+    return head.to(get_device())
+
+def model_path(node_path: str) -> Path:
+    """Determines the file path where a node's model is saved."""
+    # We look up the base models directory from config.py.
+    # If node_path is empty (""), this just resolves to MODELS_DIR / "model.pt".
+    return config.MODELS_DIR / node_path / "model.pt"
+
+def save_head(node_path: str, head: nn.Module, class_names: List[str]) -> None:
+    """Saves the trained classification head and its class names to disk."""
+    path = model_path(node_path)
+
+    # We must ensure the folder exists before we try to write a file into it.
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # We save both the weights and the list of class names so the model can map predictions to labels.
+    checkpoint = {
+        'state_dict': head.state_dict(),
+        'class_names': class_names
+    }
+    torch.save(checkpoint, path)
+
+def load_head(node_path: str) -> Optional[Tuple[nn.Module, List[str]]]:
+    """Loads a classification head and its class names from disk, if they exist."""
+    path = model_path(node_path)
+
+    # If the file hasn't been created yet, this node hasn't been trained (or doesn't exist).
+    if not path.exists():
+        return None
+
+    # Load the saved dictionary containing our weights and strings.
+    # We use weights_only=False because we are loading string lists (class_names), not just tensors.
+    checkpoint = torch.load(path, map_location=get_device(), weights_only=False)
+
+    class_names = checkpoint['class_names']
+
+    # We recreate the head structure with the correct output size, then load the weights into it.
+    head = make_head(len(class_names))
+    head.load_state_dict(checkpoint['state_dict'])
+
+    # Put the head into eval mode so it's ready for inference.
+    head.eval()
+
+    return head, class_names
+### hiervision/pipeline.py
+# Executes the hierarchical inference pipeline using the cached backbone and heads.
+# Walks down the taxonomy tree step by step, applying Grad-CAM explainability,
+# and stops if confidence is too low or a leaf node is reached.
+
+import functools
+from dataclasses import dataclass
+from typing import List, Tuple, Union
+
+import torch
+import torch.nn.functional as F
+from PIL import Image
+
+import config
+import data
+import explain
+import model
+
+
+@dataclass
+class Step:
+    node: str
+    label: str
+    confidence: float
+    top3: List[Tuple[str, float]]
+    heatmap: Union[Image.Image, None]
+
+
+@dataclass
+class Result:
+    steps: List[Step]
+    final_label: str
+    status: str
+
+
+@functools.lru_cache(maxsize=1)
+def get_cached_backbone() -> torch.nn.Module:
+    # Caches the shared, frozen VGG16 backbone so it is loaded into memory only once.
+    return model.load_backbone()
+
+
+@functools.lru_cache(maxsize=None)
+def get_cached_head(node_path: str):
+    # Caches node-specific heads to prevent repeated disk I/O during deeper traversals.
+    return model.load_head(node_path)
+
+
+def _run_step(
+    backbone: torch.nn.Module,
+    head: torch.nn.Module,
+    class_names: List[str],
+    img_tensor: torch.Tensor,
+    pil_image: Image.Image,
+    node_name: str,
+    explain_flag: bool
+) -> Step:
+    # Forward pass to get predictions without storing unnecessary gradients.
+    with torch.no_grad():
+        features = backbone(img_tensor.unsqueeze(0))
+        logits = head(features)
+        probs = F.softmax(logits, dim=1).squeeze(0)
+
+    # Extract the top 3 predictions for context, safely handling nodes with fewer than 3 classes.
+    top_probs, top_indices = torch.topk(probs, min(3, len(class_names)))
+    top3 = [(class_names[i], float(p)) for p, i in zip(top_probs, top_indices)]
+
+    best_label, best_conf = top3[0]
+    best_idx = top_indices[0].item()
+
+    # Generate a Grad-CAM heatmap if explainability is requested.
+    heatmap = None
+    if explain_flag:
+        # We must clone the tensor because Grad-CAM modifies the requires_grad attribute.
+        heatmap = explain.grad_cam(backbone, head, img_tensor.clone(), pil_image, best_idx)
+
+    return Step(node_name, best_label, best_conf, top3, heatmap)
+
+
+def _build_result(steps: List[Step], threshold: float) -> Result:
+    # Evaluates the final outcome to categorize the prediction status.
+    last_step = steps[-1]
+
+    if last_step.confidence < threshold:
+        # The model was too uncertain to continue deeper into the hierarchy.
+        status = "unknown" if len(steps) == 1 else "partial"
+    else:
+        # The model successfully reached a leaf class where no further subdivision exists.
+        status = "full"
+
+    return Result(steps, last_step.label, status)
+
+
+def predict(
+    pil_image: Image.Image,
+    threshold: float = config.THRESHOLD,
+    explain: bool = True
+) -> Union[Result, str]:
+    # Ensure the root model has been trained before attempting to start the prediction loop.
+    if get_cached_head("") is None:
+        return "Error: Root model 'models/model.pt' does not exist. Train the root node first."
+
+    backbone = get_cached_backbone()
+    device = model.get_device()
+    img_tensor = data.make_transforms(train=False)(pil_image).to(device)
+
+    steps = []
+    current_node = ""
+
+    # Continuously predict and descend the directory tree until confidence drops or a leaf is hit.
+    while True:
+        head_data = get_cached_head(current_node)
+        if head_data is None:
+            # We reached a leaf class since there is no trained head for this subfolder.
+            break
+
+        head, class_names = head_data
+        step = _run_step(backbone, head, class_names, img_tensor, pil_image, current_node, explain)
+        steps.append(step)
+
+        if step.confidence < threshold:
+            # Stop early because the model isn't confident enough to make a granular guess.
+            break
+
+        # Construct the path to the next node by appending the predicted label.
+        current_node = step.label if current_node == "" else f"{current_node}/{step.label}"
+
+    return _build_result(steps, threshold)### hiervision/predict.py
+# Command-line interface for the hierarchical image classifier.
+# Takes an image path, runs the prediction pipeline, prints the result path,
+# and saves the Grad-CAM heatmaps to the reports directory.
+
+import argparse
+import sys
+from pathlib import Path
+from PIL import Image
+
+import config
+import pipeline
+
+
+def main() -> None:
+    # Setup standard CLI arguments to allow quick terminal testing.
+    parser = argparse.ArgumentParser(description="Predict image class hierarchically.")
+    parser.add_argument("image_path", type=str, help="Path to the image to classify")
+    args = parser.parse_args()
+
+    img_path = Path(args.image_path)
+    if not img_path.exists():
+        print(f"Error: Image {img_path} not found.")
+        sys.exit(1)
+
+    try:
+        # Convert to RGB immediately to prevent issues with grayscale or RGBA inputs.
+        pil_img = Image.open(img_path).convert("RGB")
+    except Exception as e:
+        print(f"Error loading image: {e}")
+        sys.exit(1)
+
+    result = pipeline.predict(pil_img)
+
+    # Handle the string error returned if the root model is missing.
+    if isinstance(result, str):
+        print(result)
+        sys.exit(1)
+
+    # Format the traversal path into a clean, readable string (e.g., animal 94% -> mammal 88%).
+    path_parts = [f"{step.label} {int(step.confidence * 100)}%" for step in result.steps]
+    path_str = " -> ".join(path_parts)
+
+    print(f"Prediction: {path_str}")
+    print(f"Status: {result.status}")
+
+    # Ensure the reporting directory exists before attempting to save heatmaps.
+    out_dir = config.REPORTS_DIR / "predictions"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save each generated Grad-CAM heatmap with a descriptive filename.
+    for i, step in enumerate(result.steps):
+        if step.heatmap:
+            # Replace slashes with underscores in case the label contains nested formatting.
+            safe_label = step.label.replace("/", "_")
+            out_name = f"{img_path.stem}_step{i}_{safe_label}.png"
+            out_path = out_dir / out_name
+
+            step.heatmap.save(out_path)
+            print(f"Saved heatmap to {out_path}")
+
+
+if __name__ == "__main__":
+    main()### hiervision/trainer.py
+# Trains the classification heads for individual nodes in the hierarchy.
+# Uses a frozen VGG16 backbone and trains a linear layer with AMP for speed.
+# Evaluates on the test split, producing a classification report and confusion matrix.
+
+import argparse
+import random
+import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report, ConfusionMatrixDisplay
+import torch
+import torch.nn as nn
+from torch.optim import AdamW
+
+import config
+from data import get_loader, class_weights, list_classes, find_nodes
+from model import get_device, load_backbone, make_head, save_head
+
+
+def set_seed(seed: int) -> None:
+    # Set seeds to ensure deterministic behavior across runs using the config seed.
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def evaluate(
+    head: nn.Module, backbone: nn.Module, loader: torch.utils.data.DataLoader, device: torch.device
+) -> tuple[float, list[int], list[int]]:
+    # Run inference over a dataset to compute accuracy and collect predictions for evaluation.
+    head.eval()
+    y_true = []
+    y_pred = []
+    correct = 0
+    total = 0
+
+    device_type = 'cuda' if device.type == 'cuda' else 'cpu'
+
+    # Disable gradient tracking since we are only evaluating.
+    with torch.no_grad():
+        for images, labels in loader:
+            images, labels = images.to(device), labels.to(device)
+
+            # The backbone is completely frozen and used only for feature extraction.
+            features = backbone(images)
+
+            # Use Automatic Mixed Precision (AMP) for faster inference.
+            with torch.autocast(device_type=device_type, dtype=torch.float16, enabled=(device_type == 'cuda')):
+                outputs = head(features)
+
+            _, predicted = torch.max(outputs, 1)
+
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+            y_true.extend(labels.cpu().tolist())
+            y_pred.extend(predicted.cpu().tolist())
+
+    acc = correct / total if total > 0 else 0.0
+    return acc, y_true, y_pred
+
+
+def save_confusion_matrix(node_path: str, y_true: list[int], y_pred: list[int], classes: list[str]) -> None:
+    # Generate and save a confusion matrix plot to visualize misclassifications.
+    out_dir = config.REPORTS_DIR / node_path #
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    # Use sklearn's built-in display to format the grid automatically with our class names.
+    ConfusionMatrixDisplay.from_predictions(
+        y_true, y_pred, display_labels=classes, xticks_rotation='vertical', ax=ax, cmap='Blues'
+    )
+    plt.tight_layout()
+
+    out_file = out_dir / "confusion_matrix.png"
+    fig.savefig(out_file)
+    plt.close(fig)
+    print(f"Saved confusion matrix to {out_file}")
+
+
+def train_node(node_path: str) -> None:
+    # Orchestrate the training of a single node's classification head.
+    classes = list_classes(node_path)
+
+    # Skip nodes with fewer than 2 classes since there's nothing to distinguish.
+    if len(classes) < 2:
+        print(f"Skipping '{node_path}': needs at least 2 classes, found {len(classes)}.")
+        return
+
+    print(f"\n--- Training node: '{node_path}' ---")
+    device = get_device()
+    backbone = load_backbone()
+    head = make_head(len(classes))
+
+    # Initialize DataLoaders utilizing the hash-based deterministic split.
+    train_loader = get_loader(node_path, "train")
+    val_loader = get_loader(node_path, "val")
+    test_loader = get_loader(node_path, "test")
+
+    # Setup loss with inverse frequency weights to handle imbalanced folders.
+    weights = class_weights(node_path).to(device)
+    criterion = nn.CrossEntropyLoss(weight=weights)
+
+    # Train only the head using AdamW.
+    optimizer = AdamW(head.parameters(), lr=config.LR)
+
+    device_type = 'cuda' if device.type == 'cuda' else 'cpu'
+    scaler = torch.amp.GradScaler('cuda') if device_type == 'cuda' else None
+
+    best_val_acc = -1.0
+    best_state = None
+
+    for epoch in range(config.EPOCHS): #
+        head.train()
+        total_loss = 0.0
+
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
+            optimizer.zero_grad()
+
+            # Extract features from the frozen VGG16 backbone without tracking gradients.
+            with torch.no_grad():
+                features = backbone(images)
+
+            # Mixed precision (AMP) for faster training and lower VRAM usage on the RTX 3050.
+            with torch.autocast(device_type=device_type, dtype=torch.float16, enabled=(device_type == 'cuda')):
+                outputs = head(features)
+                loss = criterion(outputs, labels)
+
+            # Scale loss and step if AMP is enabled, otherwise standard backward pass.
+            if scaler:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
+
+            total_loss += loss.item() * images.size(0)
+
+        avg_train_loss = total_loss / len(train_loader.dataset)
+
+        # Evaluate on the validation set to track the best model.
+        val_acc, _, _ = evaluate(head, backbone, val_loader, device)
+        print(f"Epoch {epoch+1}/{config.EPOCHS} | Train Loss: {avg_train_loss:.4f} | Val Acc: {val_acc:.4f}")
+
+        # Keep track of the highest validation accuracy head.
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            # Copy the state dict to memory so we don't accidentally save an overfit later epoch.
+            best_state = {k: v.cpu().clone() for k, v in head.state_dict().items()}
+
+    # Restore the best head for testing and saving.
+    if best_state is not None:
+        head.load_state_dict(best_state)
+
+    save_head(node_path, head, classes)
+    print(f"Saved best head for '{node_path}' with Val Acc: {best_val_acc:.4f}")
+
+    # Final evaluation on the unseen test split.
+    test_acc, y_true, y_pred = evaluate(head, backbone, test_loader, device)
+    print(f"Test Accuracy: {test_acc:.4f}")
+    print("Classification Report:")
+
+    # zero_division=0 prevents warnings for classes that might not appear in small test sets.
+    print(classification_report(y_true, y_pred, target_names=classes, zero_division=0))
+
+    save_confusion_matrix(node_path, y_true, y_pred, classes)
+
+
+def main() -> None:
+    # Parses command line arguments to train either one specific node or all valid nodes in the hierarchy.
+    parser = argparse.ArgumentParser(description="Train HierVision node classification heads.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--node", type=str, help="Path of the node to train (e.g. '', 'animal/mammal')")
+    group.add_argument("--all", action="store_true", help="Train all nodes found in the dataset")
+    args = parser.parse_args()
+
+    set_seed(config.SEED) #
+
+    if args.all:
+        # Find all valid node directories in the taxonomy and train them sequentially.
+        nodes = find_nodes(config.DATA_DIR)
+        for node in nodes:
+            train_node(node)
+    else:
+        # Resolve 'root' alias to the empty string to match folder parsing.
+        node_path = "" if args.node == "root" else args.node
+        train_node(node_path)
+
+
+if __name__ == "__main__":
+    main()

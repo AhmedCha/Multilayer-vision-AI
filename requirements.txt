@@ -1,0 +1,9 @@
+# Lists the external Python packages required for the hiervision hierarchical image classifier.
+# Note: torch and torchvision must be installed separately with the appropriate CUDA index URL for your GPU.
+# Compatible with Python 3.14 without deprecated modules.
+
+pytorch-grad-cam
+Pillow
+matplotlib
+scikit-learn
+streamlit

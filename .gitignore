@@ -1,0 +1,13 @@
+# Specifies intentionally untracked files and directories to ignore in Git.
+# Excludes local datasets, saved model weights, reports, virtual environments, and caches.
+
+__pycache__/
+*.pyc
+data/
+models/
+reports/
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store

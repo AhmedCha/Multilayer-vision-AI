@@ -1,6 +1,6 @@
 # Executes the hierarchical inference pipeline using the cached backbone and heads.
 # Walks down the taxonomy tree step by step, applying Grad-CAM explainability,
-# and stops if confidence is too low or a leaf node is reached.
+# and supports evaluating cropped multi-subject detections.
 
 import functools
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from PIL import Image
 
 import config
-from hiervision import data, explain, model
+from hiervision import data, explain, model, detect
 
 
 @dataclass
@@ -29,6 +29,12 @@ class Result:
     steps: List[Step]
     final_label: str
     status: str
+
+
+@dataclass
+class Subject:
+    box: Union[Tuple[int, int, int, int], None]
+    result: Result
 
 
 @functools.lru_cache(maxsize=1)
@@ -89,7 +95,7 @@ def _run_step(
 def _build_result(steps: List[Step]) -> Result:
     # Evaluates the final outcome to categorize the prediction status.
     accepted_steps = [s for s in steps if s.accepted]
-    
+
     if not accepted_steps:
         final_label = "unknown"
         status = "unknown"
@@ -133,7 +139,7 @@ def predict(
 
         head, class_names = head_data
         step = _run_step(backbone, head, class_names, img_tensor, features, pil_image, current_node, with_heatmaps)
-        
+
         step.accepted = step.confidence >= threshold
         steps.append(step)
 
@@ -145,3 +151,24 @@ def predict(
         current_node = step.label if current_node == "" else f"{current_node}/{step.label}"
 
     return _build_result(steps)
+
+
+def predict_subjects(
+    pil_image: Image.Image,
+    threshold: float = config.THRESHOLD,
+    with_heatmaps: bool = True
+) -> List[Subject]:
+    # Analyzes the whole image first, and if multiple subjects are found, evaluates them individually.
+    whole_result = predict(pil_image, threshold, with_heatmaps)
+    subjects = [Subject(box=None, result=whole_result)]
+
+    if config.DETECT_SUBJECTS:
+        boxes = detect.find_subjects(pil_image)
+        # We only bother cropping if there are at least two distinct objects.
+        if len(boxes) >= 2:
+            for box in boxes:
+                crop = pil_image.crop(box)
+                crop_result = predict(crop, threshold, with_heatmaps)
+                subjects.append(Subject(box=box, result=crop_result))
+
+    return subjects

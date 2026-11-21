@@ -26,7 +26,7 @@ def grad_cam(
 
     # VGG16's last convolutional layer is located at index 28 in the features sequential block.
     # We target this layer because it contains the richest spatial features before pooling.
-    target_layers = [backbone.features[28]]
+    target_layers = [backbone.features[29]]
 
     # WHY: Because the backbone is frozen to save memory, none of its weights require gradients.
     # The autograd engine will skip gradient tracking entirely unless we explicitly tell it

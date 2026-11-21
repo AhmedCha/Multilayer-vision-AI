@@ -22,3 +22,10 @@ THRESHOLD: float = 0.80
 SEED: int = 42
 NUM_WORKERS: int = 4
 SHOW_PROGRESS: bool = True
+
+# Multi-subject detection settings
+DETECT_SUBJECTS: bool = True
+DETECTION_MIN_SCORE: float = 0.5
+MIN_SUBJECT_AREA: float = 0.05
+MAX_SUBJECTS: int = 5
+HIDE_LABELS: list[str] = ["other"]

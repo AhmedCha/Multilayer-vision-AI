@@ -21,6 +21,7 @@ class Step:
     confidence: float
     top3: List[Tuple[str, float]]
     heatmap: Union[Image.Image, None]
+    accepted: bool
 
 
 @dataclass
@@ -36,10 +37,21 @@ def get_cached_backbone() -> torch.nn.Module:
     return model.load_backbone()
 
 
-@functools.lru_cache(maxsize=None)
+_head_cache = {}
+
+
 def get_cached_head(node_path: str):
-    # Caches node-specific heads to prevent repeated disk I/O during deeper traversals.
-    return model.load_head(node_path)
+    # Uses a dict cache that ignores missing models so newly trained nodes can be found.[cite: 4]
+    if node_path not in _head_cache:
+        head_data = model.load_head(node_path)
+        if head_data is not None:
+            _head_cache[node_path] = head_data
+    return _head_cache.get(node_path)
+
+
+def reload_models() -> None:
+    # Clears the dictionary cache so new models can be loaded.
+    _head_cache.clear()
 
 
 def _run_step(
@@ -47,13 +59,13 @@ def _run_step(
     head: torch.nn.Module,
     class_names: List[str],
     img_tensor: torch.Tensor,
+    features: torch.Tensor,
     pil_image: Image.Image,
     node_name: str,
-    explain_flag: bool
+    with_heatmaps: bool
 ) -> Step:
-    # Forward pass to get predictions without storing unnecessary gradients.
+    # Forward pass uses precomputed backbone features to save time.
     with torch.no_grad():
-        features = backbone(img_tensor.unsqueeze(0))
         logits = head(features)
         probs = F.softmax(logits, dim=1).squeeze(0)
 
@@ -66,39 +78,48 @@ def _run_step(
 
     # Generate a Grad-CAM heatmap if explainability is requested.
     heatmap = None
-    if explain_flag:
+    if with_heatmaps:
         # We must clone the tensor because Grad-CAM modifies the requires_grad attribute.
         heatmap = explain.grad_cam(backbone, head, img_tensor.clone(), pil_image, best_idx)
 
-    return Step(node_name, best_label, best_conf, top3, heatmap)
+    # Note: 'accepted' will be evaluated and assigned in the main predict loop.
+    return Step(node_name, best_label, best_conf, top3, heatmap, accepted=False)
 
 
-def _build_result(steps: List[Step], threshold: float) -> Result:
+def _build_result(steps: List[Step]) -> Result:
     # Evaluates the final outcome to categorize the prediction status.
-    last_step = steps[-1]
-
-    if last_step.confidence < threshold:
-        # The model was too uncertain to continue deeper into the hierarchy.
-        status = "unknown" if len(steps) == 1 else "partial"
+    accepted_steps = [s for s in steps if s.accepted]
+    
+    if not accepted_steps:
+        final_label = "unknown"
+        status = "unknown"
     else:
-        # The model successfully reached a leaf class where no further subdivision exists.
-        status = "full"
+        final_label = accepted_steps[-1].label
+        # If the last step wasn't accepted, we stopped below root but didn't finish.
+        if not steps[-1].accepted:
+            status = "partial"
+        else:
+            status = "full"
 
-    return Result(steps, last_step.label, status)
+    return Result(steps, final_label, status)
 
 
 def predict(
     pil_image: Image.Image,
     threshold: float = config.THRESHOLD,
-    explain_flag: bool = True
-) -> Union[Result, str]:
+    with_heatmaps: bool = True
+) -> Result:
     # Ensure the root model has been trained before attempting to start the prediction loop.
     if get_cached_head("") is None:
-        return "Error: Root model 'models/model.pt' does not exist. Train the root node first."
+        raise FileNotFoundError("Error: Root model 'models/model.pt' does not exist. Train the root node first.")
 
     backbone = get_cached_backbone()
     device = model.get_device()
     img_tensor = data.make_transforms(train=False)(pil_image).to(device)
+
+    # Run the backbone ONCE per image and reuse the features.
+    with torch.no_grad():
+        features = backbone(img_tensor.unsqueeze(0))
 
     steps = []
     current_node = ""
@@ -111,14 +132,16 @@ def predict(
             break
 
         head, class_names = head_data
-        step = _run_step(backbone, head, class_names, img_tensor, pil_image, current_node, explain_flag)
+        step = _run_step(backbone, head, class_names, img_tensor, features, pil_image, current_node, with_heatmaps)
+        
+        step.accepted = step.confidence >= threshold
         steps.append(step)
 
-        if step.confidence < threshold:
+        if not step.accepted:
             # Stop early because the model isn't confident enough to make a granular guess.
             break
 
         # Construct the path to the next node by appending the predicted label.
         current_node = step.label if current_node == "" else f"{current_node}/{step.label}"
 
-    return _build_result(steps, threshold)
+    return _build_result(steps)

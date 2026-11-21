@@ -5,14 +5,14 @@
 import argparse
 import sys
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageOps
 
 import config
 from hiervision import pipeline
 
 
 def main() -> None:
-    # Setup standard CLI arguments to allow quick terminal testing.
+    # Setup standard CLI arguments to allow quick terminal testing.[cite: 8]
     parser = argparse.ArgumentParser(description="Predict image class hierarchically.")
     parser.add_argument("image_path", type=str, help="Path to the image to classify")
     args = parser.parse_args()
@@ -23,27 +23,34 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        # Convert to RGB immediately to prevent issues with grayscale or RGBA inputs.
-        pil_img = Image.open(img_path).convert("RGB")
+        # Handle EXIF rotation and convert to RGB.
+        pil_img = Image.open(img_path)
+        pil_img = ImageOps.exif_transpose(pil_img).convert("RGB")
     except Exception as e:
         print(f"Error loading image: {e}")
         sys.exit(1)
 
-    result = pipeline.predict(pil_img)
-
-    # Handle the string error returned if the root model is missing.
-    if isinstance(result, str):
-        print(result)
+    try:
+        result = pipeline.predict(pil_img, with_heatmaps=True)
+    except FileNotFoundError as e:
+        print(e)
         sys.exit(1)
 
-    # Format the traversal path into a clean, readable string (e.g., animal 94% -> mammal 88%).
-    path_parts = [f"{step.label} {int(step.confidence * 100)}%" for step in result.steps]
-    path_str = " -> ".join(path_parts)
+    # Format the traversal path for accepted steps.
+    accepted_steps = [step for step in result.steps if step.accepted]
+    path_parts = [f"{step.label} {int(step.confidence * 100)}%" for step in accepted_steps]
+    path_str = " -> ".join(path_parts) if path_parts else "None"
 
     print(f"Prediction: {path_str}")
+    
+    # Print the rejected guess separately if there is one.
+    if result.steps and not result.steps[-1].accepted:
+        rejected = result.steps[-1]
+        print(f"Rejected guess: {rejected.label} {int(rejected.confidence * 100)}%")
+
     print(f"Status: {result.status}")
 
-    # Ensure the reporting directory exists before attempting to save heatmaps.
+    # Ensure the reporting directory exists before attempting to save heatmaps.[cite: 8]
     out_dir = config.REPORTS_DIR / "predictions"
     out_dir.mkdir(parents=True, exist_ok=True)
 

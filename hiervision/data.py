@@ -98,9 +98,14 @@ class NodeDataset(Dataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
         img_path, class_idx = self.samples[idx]
-        # Convert to RGB to ensure grayscale and RGBA images don't crash the convolutions.
-        image = Image.open(img_path).convert("RGB")
-        return self.transform(image), class_idx
+        try:
+            # Convert to RGB to ensure grayscale and RGBA images don't crash the convolutions.
+            image = Image.open(img_path).convert("RGB")
+            return self.transform(image), class_idx
+        except Exception as e:
+            # Prevent training crashes on corrupted files by falling back to the next image.
+            print(f"Warning: Failed to load image {img_path} ({e}). Skipping.")
+            return self.__getitem__((idx + 1) % len(self.samples))
 
 
 def get_loader(node_path: str, split: str) -> DataLoader:
@@ -118,24 +123,34 @@ def get_loader(node_path: str, split: str) -> DataLoader:
 
 def class_weights(node_path: str) -> torch.Tensor:
     # Calculate inverse frequency weights so rare classes impact the loss more heavily.
-    # Ensures nodes train correctly even if image counts between subfolders are severely unbalanced.
+    # Count ONLY the train split to prevent leaking validation/test class distributions.
     classes = list_classes(node_path)
     counts = []
 
     for class_name in classes:
         class_dir = config.DATA_DIR / node_path / class_name
-        counts.append(len(list_images(class_dir)))
+        train_count = 0
+        for img_path in list_images(class_dir):
+            rel_path = img_path.relative_to(config.DATA_DIR).as_posix()
+            if get_split(rel_path) == "train":
+                train_count += 1
+        counts.append(train_count)
 
     total = sum(counts)
-    # Add a tiny epsilon to prevent division by zero in empty classes.
-    weights = [total / (c + 1e-6) for c in counts]
+    n_classes = len(classes)
+
+    # Normalize as total / (n_classes * count). Add a tiny epsilon to prevent division by zero.
+    weights = [total / (n_classes * (c + 1e-6)) for c in counts]
     return torch.tensor(weights, dtype=torch.float32)
 
 
-def check_data() -> None:
+def check_data() -> int:
     # Validates directory structure, image integrity, and minimum class sizes.
     extensions = {".jpg", ".jpeg", ".png", ".webp"}
     invalid_names = {"train", "val", "valid", "test"}
+
+    mixed_folder_errors = []
+    corrupted_count = 0
 
     # Structural check
     for root, dirs, files in os.walk(config.DATA_DIR):
@@ -146,7 +161,11 @@ def check_data() -> None:
 
         # A folder can be a node or a leaf class, but never contains both.
         if has_subfolders and has_images:
-            raise ValueError(f"Folder mixes images and subfolders: {root}")
+            num_imgs = len(img_files)
+            mixed_folder_errors.append(
+                f"Folder mixes images and subfolders: '{root}'. Found {num_imgs} loose images and subfolders {dirs}. "
+                f"Please move the {num_imgs} images into a leaf class folder, or delete them."
+            )
 
         # Corruption check
         for f in img_files:
@@ -157,17 +176,32 @@ def check_data() -> None:
                     img.verify()
             except Exception as e:
                 print(f"Corrupt image found: {img_path} ({e})")
+                corrupted_count += 1
+
+    if mixed_folder_errors:
+        raise ValueError("\n".join(mixed_folder_errors))
 
     # Size and composition report
     nodes = find_nodes(config.DATA_DIR)
     for node in nodes:
         print(f"Node: '{node}'")
-        for cls in list_classes(node):
-            if cls.lower() in invalid_names:
-                raise ValueError(f"Class folder cannot be named '{cls}'. This name is reserved.")
-            
+        classes = list_classes(node)
+
+        # Two or more split-like names side by side (train + test) mean the dataset came
+        # pre-split. A single class called "train" (the railway kind) is fine: splits come
+        # from a hash of the image path, not from folder names.
+        split_like = [c for c in classes if c.lower() in invalid_names]
+        if len(split_like) >= 2:
+            raise ValueError(
+                f"Node '{node}' has the folders {split_like}. This looks like a dataset that is "
+                f"already split into train/val/test. Merge them into one folder per class."
+            )
+
+        for cls in classes:
             cls_dir = config.DATA_DIR / node / cls
             count = len(list_images(cls_dir))
             print(f"  - {cls}: {count} images")
             if count < 20:
                 print(f"  WARNING: Class '{cls}' in node '{node}' has fewer than 20 images.")
+
+    return corrupted_count

@@ -11,8 +11,7 @@ import torch.nn as nn
 from torch.optim import AdamW
 
 import config
-from data import get_loader, class_weights, list_classes, find_nodes
-from model import get_device, load_backbone, make_head, save_head
+from hiervision import data, model
 
 
 def set_seed(seed: int) -> None:
@@ -61,7 +60,7 @@ def evaluate(
 
 def save_confusion_matrix(node_path: str, y_true: list[int], y_pred: list[int], classes: list[str]) -> None:
     # Generate and save a confusion matrix plot to visualize misclassifications.
-    out_dir = config.REPORTS_DIR / node_path #
+    out_dir = config.REPORTS_DIR / node_path
     out_dir.mkdir(parents=True, exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(10, 10))
@@ -79,7 +78,7 @@ def save_confusion_matrix(node_path: str, y_true: list[int], y_pred: list[int], 
 
 def train_node(node_path: str) -> None:
     # Orchestrate the training of a single node's classification head.
-    classes = list_classes(node_path)
+    classes = data.list_classes(node_path)
 
     # Skip nodes with fewer than 2 classes since there's nothing to distinguish.
     if len(classes) < 2:
@@ -87,17 +86,17 @@ def train_node(node_path: str) -> None:
         return
 
     print(f"\n--- Training node: '{node_path}' ---")
-    device = get_device()
-    backbone = load_backbone()
-    head = make_head(len(classes))
+    device = model.get_device()
+    backbone = model.load_backbone()
+    head = model.make_head(len(classes))
 
     # Initialize DataLoaders utilizing the hash-based deterministic split.
-    train_loader = get_loader(node_path, "train")
-    val_loader = get_loader(node_path, "val")
-    test_loader = get_loader(node_path, "test")
+    train_loader = data.get_loader(node_path, "train")
+    val_loader = data.get_loader(node_path, "val")
+    test_loader = data.get_loader(node_path, "test")
 
     # Setup loss with inverse frequency weights to handle imbalanced folders.
-    weights = class_weights(node_path).to(device)
+    weights = data.class_weights(node_path).to(device)
     criterion = nn.CrossEntropyLoss(weight=weights)
 
     # Train only the head using AdamW.
@@ -109,7 +108,7 @@ def train_node(node_path: str) -> None:
     best_val_acc = -1.0
     best_state = None
 
-    for epoch in range(config.EPOCHS): #
+    for epoch in range(config.EPOCHS):
         head.train()
         total_loss = 0.0
 
@@ -153,7 +152,7 @@ def train_node(node_path: str) -> None:
     if best_state is not None:
         head.load_state_dict(best_state)
 
-    save_head(node_path, head, classes)
+    model.save_head(node_path, head, classes)
     print(f"Saved best head for '{node_path}' with Val Acc: {best_val_acc:.4f}")
 
     # Final evaluation on the unseen test split.
@@ -175,18 +174,14 @@ def main() -> None:
     group.add_argument("--all", action="store_true", help="Train all nodes found in the dataset")
     args = parser.parse_args()
 
-    set_seed(config.SEED) #
+    set_seed(config.SEED)
 
     if args.all:
         # Find all valid node directories in the taxonomy and train them sequentially.
-        nodes = find_nodes(config.DATA_DIR)
+        nodes = data.find_nodes(config.DATA_DIR)
         for node in nodes:
             train_node(node)
     else:
         # Resolve 'root' alias to the empty string to match folder parsing.
         node_path = "" if args.node == "root" else args.node
         train_node(node_path)
-
-
-if __name__ == "__main__":
-    main()

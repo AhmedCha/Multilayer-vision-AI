@@ -2,7 +2,6 @@
 # It handles creating, loading, and saving these components to disk.
 # Keeping the backbone frozen and separate allows hierarchical training without memory exhaustion.
 
-import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -79,8 +78,7 @@ def load_head(node_path: str) -> Optional[Tuple[nn.Module, List[str]]]:
         return None
 
     # Load the saved dictionary containing our weights and strings.
-    # We use weights_only=False because we are loading string lists (class_names), not just tensors.
-    checkpoint = torch.load(path, map_location=get_device(), weights_only=False)
+    checkpoint = torch.load(path, map_location=get_device())
 
     class_names = checkpoint['class_names']
 

@@ -22,6 +22,8 @@ def find_nodes(data_dir: Path) -> list[str]:
     # A node is any directory that contains at least one subdirectory.
     nodes = []
     for root, dirs, files in os.walk(data_dir):
+        # Ignore hidden folders and those starting with '_'
+        dirs[:] = [d for d in dirs if not d.startswith(('.', '_'))]
         if dirs:
             rel = os.path.relpath(root, data_dir)
             # Use "" for the root node to keep CLI commands simple and consistent.
@@ -31,8 +33,8 @@ def find_nodes(data_dir: Path) -> list[str]:
 
 def list_classes(node_path: str) -> list[str]:
     # Classes are simply the direct subdirectories of a node, sorted alphabetically for deterministic indexing.
-    full_path = config.DATA_DIR / node_path # using config.DATA_DIR
-    return sorted([d.name for d in full_path.iterdir() if d.is_dir()])
+    full_path = config.DATA_DIR / node_path
+    return sorted([d.name for d in full_path.iterdir() if d.is_dir() and not d.name.startswith(('.', '_'))])
 
 
 def get_split(rel_path: str) -> str:
@@ -59,7 +61,7 @@ def make_transforms(train: bool) -> transforms.Compose:
         # Mild augmentation to prevent overfitting on small datasets.
         return transforms.Compose([
             transforms.Resize(256),
-            transforms.RandomCrop(config.IMG_SIZE), # 224 pixels
+            transforms.RandomCrop(config.IMG_SIZE),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
             transforms.ToTensor(),
@@ -69,7 +71,7 @@ def make_transforms(train: bool) -> transforms.Compose:
         # Deterministic crops for validation and testing.
         return transforms.Compose([
             transforms.Resize(256),
-            transforms.CenterCrop(config.IMG_SIZE), # 224 pixels
+            transforms.CenterCrop(config.IMG_SIZE),
             transforms.ToTensor(),
             normalize
         ])
@@ -84,10 +86,10 @@ class NodeDataset(Dataset):
 
         # Gather all matching images for this node's classes
         for class_idx, class_name in enumerate(self.classes):
-            class_dir = config.DATA_DIR / node_path / class_name # using config.DATA_DIR
+            class_dir = config.DATA_DIR / node_path / class_name
             for img_path in list_images(class_dir):
                 # Use standard posix relative paths from the overall data root for stable hashing.
-                rel_img_path = img_path.relative_to(config.DATA_DIR).as_posix() # using config.DATA_DIR
+                rel_img_path = img_path.relative_to(config.DATA_DIR).as_posix()
                 if get_split(rel_img_path) == split:
                     self.samples.append((img_path, class_idx))
 
@@ -108,9 +110,9 @@ def get_loader(node_path: str, split: str) -> DataLoader:
 
     return DataLoader(
         dataset,
-        batch_size=config.BATCH_SIZE, # hardware-optimized batch size
+        batch_size=config.BATCH_SIZE,
         shuffle=shuffle,
-        num_workers=config.NUM_WORKERS # hardware-optimized worker count
+        num_workers=config.NUM_WORKERS
     )
 
 
@@ -121,7 +123,7 @@ def class_weights(node_path: str) -> torch.Tensor:
     counts = []
 
     for class_name in classes:
-        class_dir = config.DATA_DIR / node_path / class_name # using config.DATA_DIR
+        class_dir = config.DATA_DIR / node_path / class_name
         counts.append(len(list_images(class_dir)))
 
     total = sum(counts)
@@ -133,9 +135,11 @@ def class_weights(node_path: str) -> torch.Tensor:
 def check_data() -> None:
     # Validates directory structure, image integrity, and minimum class sizes.
     extensions = {".jpg", ".jpeg", ".png", ".webp"}
+    invalid_names = {"train", "val", "valid", "test"}
 
     # Structural check
-    for root, dirs, files in os.walk(config.DATA_DIR): # using config.DATA_DIR
+    for root, dirs, files in os.walk(config.DATA_DIR):
+        dirs[:] = [d for d in dirs if not d.startswith(('.', '_'))]
         has_subfolders = len(dirs) > 0
         img_files = [f for f in files if Path(f).suffix.lower() in extensions]
         has_images = len(img_files) > 0
@@ -155,11 +159,14 @@ def check_data() -> None:
                 print(f"Corrupt image found: {img_path} ({e})")
 
     # Size and composition report
-    nodes = find_nodes(config.DATA_DIR) # using config.DATA_DIR
+    nodes = find_nodes(config.DATA_DIR)
     for node in nodes:
         print(f"Node: '{node}'")
         for cls in list_classes(node):
-            cls_dir = config.DATA_DIR / node / cls # using config.DATA_DIR
+            if cls.lower() in invalid_names:
+                raise ValueError(f"Class folder cannot be named '{cls}'. This name is reserved.")
+            
+            cls_dir = config.DATA_DIR / node / cls
             count = len(list_images(cls_dir))
             print(f"  - {cls}: {count} images")
             if count < 20:

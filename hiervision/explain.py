@@ -10,12 +10,11 @@ from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
-
 def grad_cam(
-    backbone: nn.Module, 
-    head: nn.Module, 
-    image_tensor: torch.Tensor, 
-    pil_image: Image.Image, 
+    backbone: nn.Module,
+    head: nn.Module,
+    image_tensor: torch.Tensor,
+    pil_image: Image.Image,
     class_index: int
 ) -> Image.Image:
     # We wrap the frozen feature extractor and the trained classification head into a single sequence.

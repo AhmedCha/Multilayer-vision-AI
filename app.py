@@ -9,7 +9,7 @@ from PIL import Image
 from typing import List, Tuple
 
 import config
-import pipeline
+from hiervision import pipeline
 
 
 @st.cache_resource
@@ -35,7 +35,7 @@ def plot_top3(top3: List[Tuple[str, float]]) -> Figure:
 def run_prediction(img: Image.Image, threshold: float) -> None:
     # Runs the inference pipeline and builds the step-by-step UI columns.
     with st.spinner("Analyzing image..."):
-        result = pipeline.predict(img, threshold=threshold, explain=True)
+        result = pipeline.predict(img, threshold=threshold, explain_flag=True)
 
     if isinstance(result, str):
         st.error(result)

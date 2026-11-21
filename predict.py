@@ -8,7 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 import config
-import pipeline
+from hiervision import pipeline
 
 
 def main() -> None:

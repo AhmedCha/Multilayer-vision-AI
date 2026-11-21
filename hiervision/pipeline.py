@@ -11,9 +11,7 @@ import torch.nn.functional as F
 from PIL import Image
 
 import config
-import data
-import explain
-import model
+from hiervision import data, explain, model
 
 
 @dataclass
@@ -92,7 +90,7 @@ def _build_result(steps: List[Step], threshold: float) -> Result:
 def predict(
     pil_image: Image.Image,
     threshold: float = config.THRESHOLD,
-    explain: bool = True
+    explain_flag: bool = True
 ) -> Union[Result, str]:
     # Ensure the root model has been trained before attempting to start the prediction loop.
     if get_cached_head("") is None:
@@ -113,7 +111,7 @@ def predict(
             break
 
         head, class_names = head_data
-        step = _run_step(backbone, head, class_names, img_tensor, pil_image, current_node, explain)
+        step = _run_step(backbone, head, class_names, img_tensor, pil_image, current_node, explain_flag)
         steps.append(step)
 
         if step.confidence < threshold:

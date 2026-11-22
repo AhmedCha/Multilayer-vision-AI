@@ -23,7 +23,6 @@ streamlit run app.py
 - Linux or WSL2 (developed on WSL2). Windows and macOS should work for everything except the shell commands used for tips
 - An NVIDIA GPU with a recent driver (developed on an RTX 3050 8GB). CPU works but is slow, especially with Grad-CAM and multi-subject detection
 - Docker, only for the Open Images download step (FiftyOne needs a MongoDB server)
-- About 1 GB of disk for the model weights that PyTorch downloads on first use (see section 4)
 ### Tested environment
 These are the versions this README was verified against on 2026-11-22, read with `python tools/check_env.py`:
 | Component | Version |
@@ -44,6 +43,7 @@ These are the versions this README was verified against on 2026-11-22, read with
 | fiftyone | 1.22.1 |
 | Docker | 29.10.0 |
 | MongoDB | 9.0.8 (the latest `mongo` image) |
+
 The exact versions are pinned in `requirements.txt` (and `requirements-tools.txt` for FiftyOne), so a fresh install gets the same libraries.
 ---
 ## 1. Setup
@@ -61,16 +61,6 @@ About the PyTorch line:
 - The last part of the URL (`cu132`) is the CUDA version PyTorch was built with. PyTorch ships its own CUDA runtime, so you do **not** need to install the CUDA toolkit yourself.
 - That CUDA version must not be newer than what your NVIDIA driver supports (`nvidia-smi` shows it as "CUDA Version" at the top right). On an older driver, use the PyTorch index that matches it.
 - If pip cannot find these exact versions on your index, remove the `==` pins from that line and let pip pick the newest available.
-### Check your environment
-```bash
-python tools/check_env.py
-```
-It prints your Python, driver, PyTorch and library versions, runs a small GPU test, checks that the features the code relies on exist, shows the downloaded model weights and the Docker/MongoDB status, and compares this README with your machine (it prints `MISMATCH` if the PyTorch index or the Python version written here differs from yours). The GPU line should show your card, and `fp16 autocast test: ok`.
-Always run commands **from the project root** with the virtual environment active.
-To refresh the pinned requirements after upgrading something:
-```bash
-python tools/check_env.py --write       # rewrites requirements.txt and requirements-tools.txt, keeping .bak copies
-```
 ---
 ## 2. Data folder rules
 `data/` is the taxonomy. The code scans it to discover the tree. The current dataset looks like this:
@@ -303,7 +293,6 @@ hiervision/
 │   ├── detect.py          # finds several subjects in one image
 │   └── pipeline.py        # the cascade (predict, predict_subjects)
 ├── tools/
-│   ├── check_env.py             # versions, GPU test, README check, pinned requirements
 │   ├── download_openimages.py   # download and filter Open Images
 │   ├── count_openimages.py      # how many images exist per class
 │   ├── check_splits.py          # train/val/test counts per class
@@ -313,28 +302,6 @@ hiervision/
 ├── downloads/             # FiftyOne cache and annotation files (not in git)
 └── reports/               # confusion matrices and heatmaps (not in git)
 ```
----
-## Troubleshooting
-| Problem | Fix |
-|---|---|
-| `CUDA out of memory` | Lower `BATCH_SIZE` in `config.py` and close other GPU programs |
-| Training is slow or RAM runs out | Lower `NUM_WORKERS` in `config.py` |
-| `ModuleNotFoundError` | Activate `.venv` and run from the project root |
-| pip cannot find `torch==2.15.0` | Your PyTorch index may differ from the one in this README. Remove the `==` pins from the torch line, or pick the index that matches your driver. `python tools/check_env.py` shows what is installed |
-| `check_env.py` prints `MISMATCH` for the README | The PyTorch index or Python version written in this README differs from your machine. Edit those lines to match |
-| An install fails on a very new Python | Create the venv with Python 3.12 and use the same commands |
-| "Root model does not exist" | Train the root first: `python train.py --node root` |
-| The app does not see a newly trained node | Press **Reload models** in the sidebar |
-| "Folder mixes images and subfolders" | Move the loose images into a class folder, or remove the extra subfolders |
-| "looks like a dataset that is already split" | A node has two or more folders named train, val, valid or test. Merge them into one folder per class |
-| A node is skipped for "< 10 train images" | Add images to that class or delete its empty folder (`find data -type d -empty -delete`) |
-| FiftyOne cannot connect to MongoDB | `docker ps`, then `docker start fiftyone-mongo` |
-| `Crow` or `Pigeon` "is not a valid Open Images class" | They are not in Open Images. Add those images from another source (section 3.6) |
-| `found X of Y quota, use another source` | Open Images has fewer matching images. Use another source or accept a smaller class |
-| Download uses all RAM or disk | Use the capped command in 3.4, the `--memory 2g` MongoDB variant, and only the validation and test splits |
-| "Detection failed" warning | Check your internet connection (the weights download once). Prediction still works on the whole image |
-| Heatmaps look scattered | Normal for broad nodes such as `root` and `animal` (section 8) |
-| Results look worse after renaming files | Renaming changes the hash split, so the test set changed. Avoid renaming after training starts |
 ---
 ## Known limitations
 - **One label per image or crop.** The classifiers use softmax. Several subjects are handled by cropping them with the detector, not by multi-label heads.

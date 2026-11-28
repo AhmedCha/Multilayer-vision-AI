@@ -20,6 +20,8 @@ class Step:
     label: str
     confidence: float
     top3: List[Tuple[str, float]]
+    all_probs: List[Tuple[str, float]]
+    margin: float
     heatmap: Union[Image.Image, None]
     accepted: bool
 
@@ -47,7 +49,7 @@ _head_cache = {}
 
 
 def get_cached_head(node_path: str):
-    # Uses a dict cache that ignores missing models so newly trained nodes can be found.[cite: 4]
+    # Uses a dict cache that ignores missing models so newly trained nodes can be found.
     if node_path not in _head_cache:
         head_data = model.load_head(node_path)
         if head_data is not None:
@@ -68,28 +70,32 @@ def _run_step(
     features: torch.Tensor,
     pil_image: Image.Image,
     node_name: str,
-    with_heatmaps: bool
+    with_heatmaps: bool,
 ) -> Step:
     # Forward pass uses precomputed backbone features to save time.
     with torch.no_grad():
         logits = head(features)
         probs = F.softmax(logits, dim=1).squeeze(0)
 
-    # Extract the top 3 predictions for context, safely handling nodes with fewer than 3 classes.
-    top_probs, top_indices = torch.topk(probs, min(3, len(class_names)))
-    top3 = [(class_names[i], float(p)) for p, i in zip(top_probs, top_indices)]
+    # Sort all probabilities from high to low so the UI can show full distributions and margins.
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True)
+    all_probs = [(class_names[i], float(p)) for p, i in zip(sorted_probs, sorted_indices)]
+    top3 = all_probs[:3]
 
-    best_label, best_conf = top3[0]
-    best_idx = top_indices[0].item()
+    # Compute the lead over the second choice (1.0 when only one class exists).
+    margin = all_probs[0][1] - all_probs[1][1] if len(all_probs) >= 2 else 1.0
+
+    best_label, best_conf = all_probs[0]
+    best_idx = int(sorted_indices[0].item())
 
     # Generate a Grad-CAM heatmap if explainability is requested.
     heatmap = None
     if with_heatmaps:
-        # We must clone the tensor because Grad-CAM modifies the requires_grad attribute.
+        # Clone the tensor because Grad-CAM modifies the requires_grad attribute.
         heatmap = explain.grad_cam(backbone, head, img_tensor.clone(), pil_image, best_idx)
 
-    # Note: 'accepted' will be evaluated and assigned in the main predict loop.
-    return Step(node_name, best_label, best_conf, top3, heatmap, accepted=False)
+    # 'accepted' is evaluated and assigned in the main predict loop.
+    return Step(node_name, best_label, best_conf, top3, all_probs, margin, heatmap, accepted=False)
 
 
 def _build_result(steps: List[Step]) -> Result:
@@ -102,10 +108,7 @@ def _build_result(steps: List[Step]) -> Result:
     else:
         final_label = accepted_steps[-1].label
         # If the last step wasn't accepted, we stopped below root but didn't finish.
-        if not steps[-1].accepted:
-            status = "partial"
-        else:
-            status = "full"
+        status = "partial" if not steps[-1].accepted else "full"
 
     return Result(steps, final_label, status)
 
@@ -113,7 +116,7 @@ def _build_result(steps: List[Step]) -> Result:
 def predict(
     pil_image: Image.Image,
     threshold: float = config.THRESHOLD,
-    with_heatmaps: bool = True
+    with_heatmaps: bool = True,
 ) -> Result:
     # Ensure the root model has been trained before attempting to start the prediction loop.
     if get_cached_head("") is None:
@@ -134,7 +137,7 @@ def predict(
     while True:
         head_data = get_cached_head(current_node)
         if head_data is None:
-            # We reached a leaf class since there is no trained head for this subfolder.
+            # Reached a leaf class since there is no trained head for this subfolder.
             break
 
         head, class_names = head_data
@@ -156,7 +159,7 @@ def predict(
 def predict_subjects(
     pil_image: Image.Image,
     threshold: float = config.THRESHOLD,
-    with_heatmaps: bool = True
+    with_heatmaps: bool = True,
 ) -> List[Subject]:
     # Analyzes the whole image first, and if multiple subjects are found, evaluates them individually.
     whole_result = predict(pil_image, threshold, with_heatmaps)
@@ -164,7 +167,7 @@ def predict_subjects(
 
     if config.DETECT_SUBJECTS:
         boxes = detect.find_subjects(pil_image)
-        # We only bother cropping if there are at least two distinct objects.
+        # Only bother cropping if there are at least two distinct objects.
         if len(boxes) >= 2:
             for box in boxes:
                 crop = pil_image.crop(box)

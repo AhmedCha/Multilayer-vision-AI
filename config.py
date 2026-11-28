@@ -12,6 +12,7 @@ PROJECT_ROOT: Path = BASE_DIR
 DATA_DIR: Path = BASE_DIR / "data"
 MODELS_DIR: Path = BASE_DIR / "models"
 REPORTS_DIR: Path = BASE_DIR / "reports"
+TARGETS_FILE: Path = BASE_DIR / "targets.json"
 
 # Training hyperparameters and hardware settings optimized for RTX 3050 8GB
 IMG_SIZE: int = 224

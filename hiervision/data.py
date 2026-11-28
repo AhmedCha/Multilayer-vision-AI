@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import config
+from hiervision.targets import source_tag
 
 
 def list_images(folder: Path) -> list[Path]:
@@ -29,6 +30,61 @@ def find_nodes(data_dir: Path) -> list[str]:
             # Use "" for the root node to keep CLI commands simple and consistent.
             nodes.append("" if rel == "." else rel.replace("\\", "/"))
     return nodes
+
+
+def find_leaf_folders() -> list[str]:
+    # Returns the relative paths of all folders that directly contain images.
+    leaves = []
+    extensions = {".jpg", ".jpeg", ".png", ".webp"}
+    for root, dirs, files in os.walk(config.DATA_DIR):
+        dirs[:] = [d for d in dirs if not d.startswith(('.', '_'))]
+        has_images = any(Path(f).suffix.lower() in extensions for f in files)
+        if has_images:
+            rel = os.path.relpath(root, config.DATA_DIR)
+            leaves.append(rel.replace("\\", "/"))
+    return leaves
+
+
+def dataset_overview() -> list[dict]:
+    # Generates a flat statistical overview of every class in every node for analytical dashboards.
+    # It must return data silently, counting images by split and grouping them by their source tag.
+    overview = []
+    nodes = find_nodes(config.DATA_DIR)
+    
+    for node in nodes:
+        classes = list_classes(node)
+        for cls in classes:
+            cls_dir = config.DATA_DIR / node / cls
+            images = list_images(cls_dir)
+            
+            train_c, val_c, test_c = 0, 0, 0
+            sources = {}
+            
+            for img in images:
+                rel_path = img.relative_to(config.DATA_DIR).as_posix()
+                split = get_split(rel_path)
+                
+                if split == "train":
+                    train_c += 1
+                elif split == "val":
+                    val_c += 1
+                else:
+                    test_c += 1
+                    
+                tag = source_tag(img.name)
+                sources[tag] = sources.get(tag, 0) + 1
+                
+            overview.append({
+                "node": node,
+                "class": cls,
+                "total": train_c + val_c + test_c,
+                "train": train_c,
+                "val": val_c,
+                "test": test_c,
+                "sources": sources
+            })
+            
+    return overview
 
 
 def list_classes(node_path: str) -> list[str]:

@@ -1,0 +1,562 @@
+[
+  {
+    "folder": "vehicle/car",
+    "class": "Car",
+    "quota": 600,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/truck",
+    "class": "Truck",
+    "quota": 700,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/bus",
+    "class": "Bus",
+    "quota": 316,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/train",
+    "class": "Train",
+    "quota": 326,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/bicycle",
+    "class": "Bicycle",
+    "quota": 650,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/plane",
+    "class": "Airplane",
+    "quota": 600,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/motorcycle",
+    "class": "Motorcycle",
+    "quota": 486,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/other",
+    "class": "Boat",
+    "quota": 150,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/other",
+    "class": "Helicopter",
+    "quota": 100,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/other",
+    "class": "Tank",
+    "quota": 100,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/other",
+    "class": "Snowmobile",
+    "quota": 46,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "vehicle/other",
+    "class": "Golf cart",
+    "quota": 33,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/cat",
+    "class": "Cat",
+    "quota": 600,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/dog",
+    "class": "Dog",
+    "quota": 600,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/elephant",
+    "class": "Elephant",
+    "quota": 163,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/lion",
+    "class": "Lion",
+    "quota": 192,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Horse",
+    "quota": 50,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Sheep",
+    "quota": 40,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Cattle",
+    "quota": 40,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Giraffe",
+    "quota": 30,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Zebra",
+    "quota": 30,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Bear",
+    "quota": 40,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Fox",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Deer",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Rabbit",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Squirrel",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Monkey",
+    "quota": 40,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Camel",
+    "quota": 25,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Kangaroo",
+    "quota": 25,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/mammal/other",
+    "class": "Tiger",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": "looks like a lion: a useful hard negative"
+  },
+  {
+    "folder": "animal/bird/duck",
+    "class": "Duck",
+    "quota": 224,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "animal/bird/eagle",
+    "class": "Eagle",
+    "quota": 244,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "animal/bird/canary",
+    "class": "Canary",
+    "quota": 78,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Parrot",
+    "quota": 40,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Owl",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Penguin",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Sparrow",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Swan",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": "hard negative for duck"
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Goose",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": "hard negative for duck"
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Chicken",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Turkey",
+    "quota": 20,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Ostrich",
+    "quota": 25,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Falcon",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": "hard negative for eagle"
+  },
+  {
+    "folder": "animal/bird/other",
+    "class": "Woodpecker",
+    "quota": 20,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "building",
+    "class": "Building",
+    "quota": 400,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "building",
+    "class": "House",
+    "quota": 250,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "building",
+    "class": "Tower",
+    "quota": 100,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "building",
+    "class": "Skyscraper",
+    "quota": 100,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "building",
+    "class": "Castle",
+    "quota": 60,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "building",
+    "class": "Lighthouse",
+    "quota": 30,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Person",
+    "quota": 150,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Tree",
+    "quota": 100,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Flower",
+    "quota": 100,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Plant",
+    "quota": 60,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Chair",
+    "quota": 60,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Table",
+    "quota": 60,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Couch",
+    "quota": 40,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Bed",
+    "quota": 40,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Laptop",
+    "quota": 50,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Mobile phone",
+    "quota": 50,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Television",
+    "quota": 40,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Clock",
+    "quota": 20,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Lamp",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Bottle",
+    "quota": 50,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Coffee cup",
+    "quota": 40,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Pizza",
+    "quota": 40,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Cake",
+    "quota": 40,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Apple",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Banana",
+    "quota": 30,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Hat",
+    "quota": 40,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Footwear",
+    "quota": 40,
+    "min_area": 0.1,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Handbag",
+    "quota": 30,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Book",
+    "quota": 40,
+    "min_area": 0.15,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Guitar",
+    "quota": 30,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "other",
+    "class": "Toy",
+    "quota": 40,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "animal/insect/other",
+    "class": "Spider",
+    "quota": 100,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "animal/insect/other",
+    "class": "Moths and butterflies",
+    "quota": 46,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "animal/insect/ant",
+    "class": "Ant",
+    "quota": 37,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "animal/insect/bee",
+    "class": "Bee",
+    "quota": 70,
+    "min_area": 0.25,
+    "note": ""
+  },
+  {
+    "folder": "animal/insect/other",
+    "class": "Beetle",
+    "quota": 100,
+    "min_area": 0.25,
+    "note": ""
+  }
+]
